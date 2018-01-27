@@ -30,10 +30,6 @@
 #include "../field/field.hpp"
 #include "../coordinates/coordinates.hpp"
 
-#if !MAGNETIC_FIELDS_ENABLED
-#error "This problem generator requires magnetic fields"
-#endif
-
 static void GetCylCoord(Coordinates *pco,Real &rad,Real &phi,Real &z,int i,int j,int k);
 static Real DenProfileCyl(const Real rad, const Real phi, const Real z);
 static Real PoverR(const Real rad, const Real phi, const Real z);
@@ -54,9 +50,9 @@ void DiskInnerX3(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
 void DiskOuterX3(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
   Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
 
-// problem parameters which are useful to make global to this file
+// problem parameters which are useful to make global to this file  
 static Real gm0, r0, rho0, dslope, p0_over_r0, pslope, gamma_gas;
-static Real dfloor, beta;
+static Real dfloor;
 
 //========================================================================================
 //! \fn void Mesh::InitUserMeshData(ParameterInput *pin)
@@ -80,8 +76,6 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
     p0_over_r0 = pin->GetOrAddReal("problem","p0_over_r0",0.0025);
     pslope = pin->GetOrAddReal("problem","pslope",0.0);
     gamma_gas = pin->GetReal("hydro","gamma");
-    beta = pin->GetOrAddReal("problem","beta",200.0);
-
   }else{
     p0_over_r0=SQR(pin->GetReal("hydro","iso_sound_speed"));
   }
@@ -120,14 +114,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   Real rad, phi, z;
   Real v1, v2, v3;
 
-  AthenaArray<Real> a1,a2,a3;
-  int nx1 = (ie-is)+1 + 2*(NGHOST);
-  int nx2 = (je-js)+1 + 2*(NGHOST);
-  int nx3 = (ke-ks)+1 + 2*(NGHOST);
-  a1.NewAthenaArray(nx3,nx2,nx1);
-  a2.NewAthenaArray(nx3,nx2,nx1);
-  a3.NewAthenaArray(nx3,nx2,nx1);
-
   //  Initialize density and momenta
   for(int k=ks; k<=ke; ++k) {
   for (int j=js; j<=je; ++j) {
@@ -148,109 +134,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
       }
     }
   }}
-
-  // Use vector potential to initialize field loops
-  for (int k=ks; k<=ke+1; k++) {
-    for (int j=js; j<=je+1; j++) {
-      for (int i=is; i<=ie+1; i++) {
-        Real p_over_r = PoverR(rad,phi,z);
-        a1(k,j,i) = 0.0;
-        a2(k,j,i) = 0.0;
-        a3(k,j,i) = SQR(phydro->u(IDN,k,j,i)*pow(rad/100.0,2.0));
-        a3(k,j,i) *= sin(2.0*PI*log10(rad/2.)/0.2);
-        //a3(k,j,i) *= exp(-pow(z/rad*p_over_r,4.0));
-      }
-    }
-  }
-
-  // Initialize interface fields
-  AthenaArray<Real> area,len,len_p1;
-  area.NewAthenaArray(nx1);
-  len.NewAthenaArray(nx1);
-  len_p1.NewAthenaArray(nx1);
-
-  // for 1,2,3-D
-  for (int k=ks; k<=ke; ++k) {
-    // reset loop limits for polar boundary
-    int jl=js; int ju=je+1;
-    if (block_bcs[INNER_X2] == 5) jl=js+1;
-    if (block_bcs[OUTER_X2] == 5) ju=je;
-    for (int j=jl; j<=ju; ++j) {
-      pcoord->Face2Area(k,j,is,ie,area);
-      pcoord->Edge3Length(k,j,is,ie+1,len);
-      for (int i=is; i<=ie; ++i) {
-        pfield->b.x2f(k,j,i) = -1.0*(len(i+1)*a3(k,j,i+1) - len(i)*a3(k,j,i))/area(i);
-      }
-    }
-  }
-  for (int k=ks; k<=ke+1; ++k) {
-    for (int j=js; j<=je; ++j) {
-      pcoord->Face3Area(k,j,is,ie,area);
-      pcoord->Edge2Length(k,j,is,ie+1,len);
-      for (int i=is; i<=ie; ++i) {
-        pfield->b.x3f(k,j,i) = (len(i+1)*a2(k,j,i+1) - len(i)*a2(k,j,i))/area(i);
-      }
-    }
-  }
-
-  // for 2D and 3D
-  if (block_size.nx2 > 1) {
-    for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face1Area(k,j,is,ie+1,area);
-        pcoord->Edge3Length(k,j  ,is,ie+1,len);
-        pcoord->Edge3Length(k,j+1,is,ie+1,len_p1);
-        for (int i=is; i<=ie+1; ++i) {
-          pfield->b.x1f(k,j,i) = (len_p1(i)*a3(k,j+1,i) - len(i)*a3(k,j,i))/area(i);
-        }
-      }
-    }
-    for (int k=ks; k<=ke+1; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face3Area(k,j,is,ie,area);
-        pcoord->Edge1Length(k,j  ,is,ie,len);
-        pcoord->Edge1Length(k,j+1,is,ie,len_p1);
-        for (int i=is; i<=ie; ++i) {
-          pfield->b.x3f(k,j,i) -= (len_p1(i)*a1(k,j+1,i) - len(i)*a1(k,j,i))/area(i);
-        }
-      }
-    }
-  }
-  // for 3D only
-  if (block_size.nx3 > 1) {
-    for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face1Area(k,j,is,ie+1,area);
-        pcoord->Edge2Length(k  ,j,is,ie+1,len);
-        pcoord->Edge2Length(k+1,j,is,ie+1,len_p1);
-        for (int i=is; i<=ie+1; ++i) {
-          pfield->b.x1f(k,j,i) -= (len_p1(i)*a2(k+1,j,i) - len(i)*a2(k,j,i))/area(i);
-        }
-      }
-    }
-    for (int k=ks; k<=ke; ++k) {
-      // reset loop limits for polar boundary
-      int jl=js; int ju=je+1;
-      if (block_bcs[INNER_X2] == 5) jl=js+1;
-      if (block_bcs[OUTER_X2] == 5) ju=je;
-      for (int j=jl; j<=ju; ++j) {
-        pcoord->Face2Area(k,j,is,ie,area);
-        pcoord->Edge1Length(k  ,j,is,ie,len);
-        pcoord->Edge1Length(k+1,j,is,ie,len_p1);
-        for (int i=is; i<=ie; ++i) {
-          pfield->b.x2f(k,j,i) += (len_p1(i)*a1(k+1,j,i) - len(i)*a1(k,j,i))/area(i);
-        }
-      }
-    }
-
-  a1.DeleteAthenaArray();
-  a2.DeleteAthenaArray();
-  a3.DeleteAthenaArray();
-  area.DeleteAthenaArray();
-  len.DeleteAthenaArray();
-  len_p1.DeleteAthenaArray();
-}
-
 
   return;
 }
@@ -316,11 +199,11 @@ static void VelProfileCyl(const Real rad, const Real phi, const Real z,
     v3=vel;
   }
   return;
-}
+} 
 
 //----------------------------------------------------------------------------------------
 //!\f: User-defined boundary Conditions: sets solution in ghost zones to initial values
-//
+// 
 
 void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
