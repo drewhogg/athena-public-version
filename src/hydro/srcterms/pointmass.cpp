@@ -27,7 +27,7 @@ void HydroSourceTerms::PointMass(const Real dt, const AthenaArray<Real> *flux,
 #pragma simd
       for (int i=pmb->is; i<=pmb->ie; ++i) {
         Real den = prim(IDN,k,j,i);
-        Real src = dt*den*pmb->pcoord->coord_src1_i_(i)*gm_/pmb->pcoord->x1v(i);
+        Real src = dt*den*pmb->pcoord->coord_src1_i_(i)*gm_/(pmb->pcoord->x1v(i)-2.0);
         cons(IM1,k,j,i) -= src;
         if (NON_BAROTROPIC_EOS) cons(IEN,k,j,i) -=
           dt*0.5*(pmb->pcoord->phy_src1_i_(i)*flux[X1DIR](IDN,k,j,i)*gm_

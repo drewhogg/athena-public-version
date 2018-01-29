@@ -56,7 +56,7 @@ void DiskOuterX3(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
 
 // problem parameters which are useful to make global to this file
 static Real gm0, r0, rho0, dslope, p0_over_r0, pslope, gamma_gas;
-static Real dfloor, beta;
+static Real dfloor, beta, hr, env1, env2, cs;
 
 //========================================================================================
 //! \fn void Mesh::InitUserMeshData(ParameterInput *pin)
@@ -81,6 +81,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
     pslope = pin->GetOrAddReal("problem","pslope",0.0);
     gamma_gas = pin->GetReal("hydro","gamma");
     beta = pin->GetOrAddReal("problem","beta",200.0);
+    hr = pin->GetOrAddReal("problem","h_r",0.1);
 
   }else{
     p0_over_r0=SQR(pin->GetReal("hydro","iso_sound_speed"));
@@ -118,7 +119,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
 void MeshBlock::ProblemGenerator(ParameterInput *pin)
 {
   Real rad, phi, z;
-  Real v1, v2, v3;
+  Real v1, v2, v3, lambda;
 
   AthenaArray<Real> a1,a2,a3;
   int nx1 = (ie-is)+1 + 2*(NGHOST);
@@ -134,31 +135,38 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
     for (int i=is; i<=ie; ++i) {
       GetCylCoord(pcoord,rad,phi,z,i,j,k); // convert to cylindrical coordinates
       // compute initial conditions in cylindrical coordinates
-      phydro->u(IDN,k,j,i) = DenProfileCyl(rad,phi,z);
+      //phydro->u(IDN,k,j,i) = DenProfileCyl(rad,phi,z);
+      env1=atan(10.0*(rad-6))/PI+0.5;
+      env2=atan(145.0-rad)/PI+0.5;
+      //phydro->u(IDN,k,j,i) = std::max(100.*exp(-z*z/(2.0*hr*hr*rad*rad))*pow(rad,-1.5)*env1*env2,1.e-7);
+      phydro->u(IDN,k,j,i) = std::max(8.*exp(-z*z/(2.0*hr*hr*rad*rad))*pow(rad,-1.5),1.e-7);
+
       VelProfileCyl(rad,phi,z,v1,v2,v3);
+
+      cs = hr/sqrt(rad);
 
       phydro->u(IM1,k,j,i) = phydro->u(IDN,k,j,i)*v1;
       phydro->u(IM2,k,j,i) = phydro->u(IDN,k,j,i)*v2;
       phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i)*v3;
-      if (NON_BAROTROPIC_EOS){
-        Real p_over_r = PoverR(rad,phi,z);
-        phydro->u(IEN,k,j,i) = p_over_r*phydro->u(IDN,k,j,i)/(gamma_gas - 1.0);
-        phydro->u(IEN,k,j,i) += 0.5*(SQR(phydro->u(IM1,k,j,i))+SQR(phydro->u(IM2,k,j,i))
+
+      phydro->u(IEN,k,j,i) = cs*cs*phydro->u(IDN,k,j,i)/(gamma_gas - 1.0);
+      phydro->u(IEN,k,j,i) += 0.5*(SQR(phydro->u(IM1,k,j,i))+SQR(phydro->u(IM2,k,j,i))
                                    + SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
-      }
     }
   }}
+
+  lambda = (log10(pcoord->x1v(ie))-log10(pcoord->x1v(is)))/5.; // 10 loops
 
   // Use vector potential to initialize field loops
   for (int k=ks; k<=ke+1; k++) {
     for (int j=js; j<=je+1; j++) {
       for (int i=is; i<=ie+1; i++) {
-        Real p_over_r = PoverR(rad,phi,z);
+        GetCylCoord(pcoord,rad,phi,z,i,j,k); // convert to cylindrical coordinates
         a1(k,j,i) = 0.0;
         a2(k,j,i) = 0.0;
-        a3(k,j,i) = SQR(phydro->u(IDN,k,j,i)*pow(rad/100.0,2.0));
-        a3(k,j,i) *= sin(2.0*PI*log10(rad/2.)/0.2);
-        //a3(k,j,i) *= exp(-pow(z/rad*p_over_r,4.0));
+        a3(k,j,i) = sqrt(cs*cs*phydro->u(IDN,k,j,i));//*pow(rad/100.0,2.0));
+        a3(k,j,i) *= sin(2.0*PI*log10(rad/pcoord->x1v(is))/lambda);
+        a3(k,j,i) *= exp(-pow(z/hr/rad,2.0));
       }
     }
   }
@@ -243,6 +251,38 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
       }
     }
 
+  // Calc Normalization
+  Real bsq_max = 0.0;
+  Real prs_max = 0.0;
+  for (int k=ks; k<=ke+1; k++) {
+    for (int j=js; j<=je+1; j++) {
+      for (int i=is; i<=ie+1; i++) {
+        GetCylCoord(pcoord,rad,phi,z,i,j,k); // convert to cylindrical coordinates
+        bsq_max = std::max(bsq_max, 0.5*(SQR(0.5*(pfield->b.x1f(k,j,i) + pfield->b.x1f(k,j,i+1))) + SQR(0.5*(pfield->b.x2f(k,j,i) + pfield->b.x2f(k,j+1,i))) + SQR(0.5*(pfield->b.x3f(k,j,i) + pfield->b.x3f(k+1,j,i)))));
+        cs = hr/sqrt(rad);
+        prs_max = std::max(prs_max, cs*cs*phydro->u(IDN,k,j,i));
+      }
+    }
+  }
+  Real B0 = prs_max/bsq_max/beta;
+
+  for (int k=ks; k<=ke+1; k++) {
+    for (int j=js; j<=je+1; j++) {
+      for (int i=is; i<=ie+1; i++) {
+        pfield->b.x1f(k,j,i) /= sqrt(B0);
+        pfield->b.x2f(k,j,i) /= sqrt(B0);
+        pfield->b.x3f(k,j,i) /= sqrt(B0);
+      }
+    }
+  }
+
+  for (int k=ks; k<=ke+1; k++) {
+    for (int j=js; j<=je+1; j++) {
+      for (int i=is; i<=ie+1; i++) {
+        phydro-> u(IEN,k,j,i) += 0.5*(SQR(0.5*(pfield->b.x1f(k,j,i) + pfield->b.x1f(k,j,i+1))) + SQR(0.5*(pfield->b.x2f(k,j,i) + pfield->b.x2f(k,j+1,i))) + SQR(0.5*(pfield->b.x3f(k,j,i) + pfield->b.x3f(k+1,j,i))));
+     }
+   }
+ }
   a1.DeleteAthenaArray();
   a2.DeleteAthenaArray();
   a3.DeleteAthenaArray();
@@ -303,9 +343,9 @@ static void VelProfileCyl(const Real rad, const Real phi, const Real z,
                           Real &v1, Real &v2, Real &v3)
 {
   Real p_over_r = PoverR(rad, phi, z);
-  Real vel = (dslope+pslope)*p_over_r/(gm0/rad) + (1.0+pslope)
-             - pslope*rad/sqrt(rad*rad+z*z);
-  vel = sqrt(gm0/rad)*sqrt(vel);
+  //Real vel = (dslope+pslope)*p_over_r/(gm0/rad) + (1.0+pslope)
+             //- pslope*rad/sqrt(rad*rad+z*z);
+  Real vel = sqrt(gm0/rad);//*sqrt(vel);
   if(COORDINATE_SYSTEM == "cylindrical"){
     v1=0.0;
     v2=vel;
