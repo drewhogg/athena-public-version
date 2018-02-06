@@ -1,15 +1,15 @@
 <comment>
 problem   = Kerlerian disk in spherical polar coordinates
 reference =
-configure = --prob=disk --coord=spherical_polar -b
+configure = --prob=disk --coord=spherical_polar
 
 <job>
 problem_id  = disk      # problem ID: basename of output filenames
 
 <output1>
-file_type   = vtk      # vtk data dump
+file_type   = vtk       # VTK data dump
 variable    = prim      #
-dt          = 62.8      # time increment between outputs
+dt          = 1      # time increment between outputs
 
 <output2>
 file_type   = hst       # History data dump
@@ -22,8 +22,8 @@ tlim        = 628.      # time limit
 
 <mesh>
 nx1         = 256       # Number of zones in X1-direction
-x1min       = 4.       # minimum value of X1
-x1max       = 100.0       # maximum value of X1
+x1min       = 0.3       # minimum value of X1
+x1max       = 3.0       # maximum value of X1
 ix1_bc      = user      # Inner-X1 boundary condition flag
 ox1_bc      = user      # Outer-X1 boundary condition flag
 x1rat       = 1.009     # non-uniform grid ratio
@@ -34,9 +34,9 @@ x2max       = 1.9708    # maximum value of X2
 ix2_bc      = user      # Inner-X2 boundary condition flag
 ox2_bc      = user      # Outer-X2 boundary condition flag
 
-nx3         = 64              # Number of zones in X3-direction
+nx3         = 4              # Number of zones in X3-direction
 x3min       = 0.0            # minimum value of X3
-x3max       = 3.141592653589  # maximum value of X3 6.28318530718
+x3max       = 6.28318530718  # maximum value of X3
 ix3_bc      = periodic       # Inner-X3 boundary condition flag
 ox3_bc      = periodic       # Outer-X3 boundary condition flag
 
@@ -55,5 +55,3 @@ rho0            = 1.0
 p0_over_r0      = 0.01
 pslope          = -0.5
 dslope          = -2.25
-beta            = 200.0
-h_r             = 0.1
